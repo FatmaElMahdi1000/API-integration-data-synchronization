@@ -1,0 +1,29 @@
+services:
+  oracle-db:
+    image: gvenzl/oracle-xe:slim-faststart
+    container_name: oracle-db
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_PASSWORD=NewPassword
+      - APP_USER=VARTHAK_APP
+      - APP_USER_PASSWORD=app123
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: springboot-app
+    ports:
+      - "3030:3030"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-db:1521/XEPDB1
+      - SPRING_DATASOURCE_USERNAME=VARTHAK_APP
+      - SPRING_DATASOURCE_PASSWORD=app123
+      - CUSTOMER_API_TOKEN=c709b01ee38bcad09dc02ce366acf8d2d1b7d55071ec5154
+    depends_on:
+      oracle-db:
+        condition: service_healthy
