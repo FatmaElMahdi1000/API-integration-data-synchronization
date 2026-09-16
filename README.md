@@ -511,7 +511,6 @@ Coverage includes:
 ## 16. Documents
 
 - **[DESIGN.md](DESIGN.md)** — Detailed architecture: ER diagrams, sequence flows, deduplication strategy (409 vs. idempotent upsert), N+1 query solution, soft-delete rationale, multi-tenant scoping, and the production scalability roadmap.
-- **[SCOPE_AND_POST_FEEDBACK.md](SCOPE_AND_POST_FEEDBACK.md)** — Technical clarifications and assessment feedback responses: pagination/retry, concurrency handling, mapper correction, transaction rollback, customer isolation, failure profile, Flyway, the Oracle/Docker decision, UI scope, and additional optimizations.
 
 ---
 
