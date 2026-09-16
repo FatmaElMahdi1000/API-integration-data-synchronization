@@ -122,8 +122,8 @@
             <!-- Omit version if managed by spring-boot-starter-parent, or match your flyway-core version -->
             <configuration>
                 <url>jdbc:oracle:thin:@//localhost:1521/XEPDB1</url>
-                <user>${env.DB_USERNAME}</user>
-                <password>${env.DB_PASSWORD}</password>
+                <user>VARTHAK_APP</user>
+                <password>app123</password>
             </configuration>
             </plugin>
 

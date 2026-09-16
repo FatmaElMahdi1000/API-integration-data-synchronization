@@ -1,5 +1,6 @@
-package com.example.varthakassesment.Client.ClientService;
+package com.example.varthakassesment.Services;
 
+import com.example.varthakassesment.Client.ClientService.CustomerApiService;
 import com.example.varthakassesment.DTO.External.ExPaginationDTO;
 import com.example.varthakassesment.DTO.External.ExUserDTO;
 import com.example.varthakassesment.Response.UserListResponse;

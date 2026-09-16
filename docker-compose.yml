@@ -16,6 +16,7 @@ services:
 
   app:
     build: .
+    image: varthak-assesment-app:latest
     container_name: springboot-app
     ports:
       - "3030:3030"

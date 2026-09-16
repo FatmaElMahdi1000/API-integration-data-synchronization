@@ -22,6 +22,7 @@ public interface UserMapper {
     @Mapping(target = "customer", ignore = true)
     @Mapping(target = "role", ignore = true)
     @Mapping(target = "active", ignore = true)
+    @Mapping(target = "status", ignore = true)
     @Mapping(target = "company", ignore = true) //Added ignoring company mapping.
 
 

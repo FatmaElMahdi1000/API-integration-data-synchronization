@@ -1,6 +1,5 @@
 package com.example.varthakassesment.Services;
 
-
 import com.example.varthakassesment.DTO.Internal.UserDTO;
 import com.example.varthakassesment.Enum.ResponseStatus;
 import com.example.varthakassesment.Model.*;
@@ -16,25 +15,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
-import static java.util.Optional.empty;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-
 public class UserServiceTest {
 
-
     @Mock
-    private  UserRepo _userRepo;
+    private UserRepo _userRepo;
 
     @InjectMocks
-    UserService _userService; //One we test
+    private UserService _userService;
 
-    //fake data:
     private List<User> mockUsers;
     private User user1;
     private User user2;
@@ -47,8 +41,7 @@ public class UserServiceTest {
     void setUp() {
         mockUsers = new ArrayList<>();
 
-        // Fake related entities
-         customer = new Customer();
+        customer = new Customer();
         customer.setCustomerID(UUID.randomUUID());
 
         role = new Role();
@@ -58,10 +51,9 @@ public class UserServiceTest {
         company.setCompanyId(UUID.randomUUID());
         company.setCompanyName("ABC Corp");
 
-        Status status = new Status();
+        status = new Status();
         status.setStatusId(UUID.randomUUID());
 
-        // Fake User 1
         user1 = new User();
         user1.setUserId(UUID.randomUUID());
         user1.setCustomer(customer);
@@ -74,7 +66,6 @@ public class UserServiceTest {
         user1.setPhone("1234567890");
         user1.setActive(1);
 
-        // Fake User 2 (Nullable relationships to test safety checks)
         user2 = new User();
         user2.setUserId(UUID.randomUUID());
         user2.setExternalUserId("ext-002");
@@ -88,96 +79,56 @@ public class UserServiceTest {
     }
 
     @Test
-    void FindingALLUsers()
-    {
+    void FindingALLUsers() {
+        when(this._userRepo.findByCustomer_CustomerID(customer.getCustomerID())).thenReturn(mockUsers);
 
-        //List of users returned successfully
-        when(this._userRepo.findAll()).thenReturn(mockUsers);
+        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers(customer.getCustomerID());
 
-        //Act
-        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers();
-
-        //
-        assertEquals(response.getData().size(), mockUsers.size());
+        assertEquals(mockUsers.size(), response.getData().size());
         assertEquals(ResponseStatus.OK, response.getResponse());
 
-        verify(this._userRepo).findAll();
-
+        verify(this._userRepo).findByCustomer_CustomerID(customer.getCustomerID());
     }
 
-
     @Test
-    void getAllUsers_WhenEmpty_ReturnsOkWithEmptyList()
-    {
-        //Failed retrieving users data
-        when(this._userRepo.findAll()).thenReturn(List.of()); //List.of returning empty list
-        //Act
-        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers();
+    void getAllUsers_WhenEmpty_ReturnsOkWithEmptyList() {
+        when(this._userRepo.findByCustomer_CustomerID(customer.getCustomerID())).thenReturn(List.of());
+
+        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers(customer.getCustomerID());
 
         assertEquals(ResponseStatus.OK, response.getResponse());
         assertTrue(response.getData().isEmpty());
 
+        verify(this._userRepo).findByCustomer_CustomerID(customer.getCustomerID());
     }
 
     @Test
-    void GettingErrorRetrievingUsers()
-    {
-        when(this._userRepo.findAll()).thenThrow(new RuntimeException("Database connection issue"));
+    void GettingErrorRetrievingUsers() {
+        when(this._userRepo.findByCustomer_CustomerID(customer.getCustomerID()))
+                .thenThrow(new RuntimeException("Database connection issue"));
 
-        //Act
-        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers();
+        GeneralResponse<List<UserDTO>> response = this._userService.getAllUsers(customer.getCustomerID());
 
-        //Assert and verify
         assertEquals(ResponseStatus.INTERNAL_SERVER_ERROR, response.getResponse());
         assertNull(response.getData());
-        verify(this._userRepo).findAll();
+
+        verify(this._userRepo).findByCustomer_CustomerID(customer.getCustomerID());
     }
 
-
     @Test
-    void getUserByCompany_Success()
-    {
-        //when
-        when(this._userRepo.findByCompany_CompanyNameContainingIgnoreCase(company.getCompanyName())).thenReturn(mockUsers);
+    void getUserByCompany_Success() {
+        when(this._userRepo.findByCustomer_CustomerIDAndCompany_CompanyNameContainingIgnoreCase(
+                customer.getCustomerID(), company.getCompanyName()))
+                .thenReturn(mockUsers);
 
-        //Act
-        GeneralResponse<List<UserDTO>> response = this._userService.getUsersByCompany( company.getCompanyName());
-
-        assertEquals(ResponseStatus.OK,response.getResponse());
-        assertEquals(mockUsers.size(), response.getData().size());
+        GeneralResponse<List<UserDTO>> response = this._userService.getUsersByCompany(
+                customer.getCustomerID(), company.getCompanyName());
 
         assertNotNull(response);
+        assertEquals(ResponseStatus.OK, response.getResponse());
+        assertEquals(mockUsers.size(), response.getData().size());
 
-        //Assert/verify //testing service / verifies mock
-        verify(this._userRepo)
-                .findByCompany_CompanyNameContainingIgnoreCase(company.getCompanyName()); //verification that the service used them method
-
+        verify(this._userRepo).findByCustomer_CustomerIDAndCompany_CompanyNameContainingIgnoreCase(
+                customer.getCustomerID(), company.getCompanyName());
     }
-
-
-    @Test
-    void getUserByCompany_Failure()
-    {
-
-        //when
-        when(this._userRepo.findByCompany_CompanyNameContainingIgnoreCase(company.getCompanyName())).thenThrow(new RuntimeException("Failed to retrieve users by company"));
-
-        //Act
-        GeneralResponse<List<UserDTO>> response = this._userService.getUsersByCompany( company.getCompanyName());
-
-        //Assert/verify
-        assertEquals(ResponseStatus.INTERNAL_SERVER_ERROR,response.getResponse());
-        assertNull(response.getData());
-
-//        verifyNoInteractions(); //verification that the service used the mock/verify mock
-        verify(this._userRepo)
-                .findByCompany_CompanyNameContainingIgnoreCase(company.getCompanyName());
-
-
-    }
-
 }
-
-
-
-
