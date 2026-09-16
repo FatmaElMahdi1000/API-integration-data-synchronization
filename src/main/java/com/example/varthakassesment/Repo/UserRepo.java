@@ -11,12 +11,14 @@ import java.util.UUID;
 public interface UserRepo extends JpaRepository<User, UUID> {
 
 
+    public List<User> findByCustomer_CustomerID(UUID customerId);
+
     Optional<User> findByCustomerAndExternalUserId(
             Customer customer,
             String externalUserId
     );
 
-
+    public List<User> findByCustomer_CustomerIDAndCompany_CompanyNameContainingIgnoreCase(UUID customerId, String companyName);
     //With even part of the name of the company will retrieve it:
     public List<User> findByCompany_CompanyNameContainingIgnoreCase(String companyName);
 

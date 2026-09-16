@@ -17,39 +17,47 @@ public class UserService {
     private final UserRepo userRepo;
 
     public UserService(UserRepo userRepo) {
-
         this.userRepo = userRepo;
     }
 
-    public GeneralResponse<List<UserDTO>> getAllUsers() {
+    public GeneralResponse<List<UserDTO>> getAllUsers(UUID customerId) {
+
         try {
-            List<User> users = userRepo.findAll();
+
+             List<User> users =
+                    userRepo.findByCustomer_CustomerID(customerId);
+
             List<UserDTO> usersDTO = new ArrayList<>();
 
             for (User user : users) {
-                UUID customerId = null;
+
+                UUID userCustomerId = null;
+
                 if (user.getCustomer() != null) {
-                    customerId = user.getCustomer().getCustomerID();
+                    userCustomerId = user.getCustomer().getCustomerID();
                 }
 
                 UUID roleId = null;
+
                 if (user.getRole() != null) {
                     roleId = user.getRole().getRoleId();
                 }
 
                 UUID companyId = null;
+
                 if (user.getCompany() != null) {
                     companyId = user.getCompany().getCompanyId();
                 }
 
                 UUID statusId = null;
+
                 if (user.getStatus() != null) {
                     statusId = user.getStatus().getStatusId();
                 }
 
                 UserDTO dto = new UserDTO(
                         user.getUserId(),
-                        customerId,
+                        userCustomerId,
                         roleId,
                         companyId,
                         statusId,
@@ -72,7 +80,6 @@ public class UserService {
             );
 
         } catch (Exception ex) {
-            ex.printStackTrace();
 
             return new GeneralResponse<>(
                     ResponseStatus.INTERNAL_SERVER_ERROR,
@@ -82,39 +89,51 @@ public class UserService {
         }
     }
 
-    public GeneralResponse<List<UserDTO>> getUsersByCompany(String companyName) {
+
+    public GeneralResponse<List<UserDTO>> getUsersByCompany(
+            UUID customerId,
+            String companyName) {
+
         try {
 
+            // Tenant + company filtering
             List<User> users =
-                    userRepo.findByCompany_CompanyNameContainingIgnoreCase(companyName);
+                    userRepo.findByCustomer_CustomerIDAndCompany_CompanyNameContainingIgnoreCase(
+                            customerId,
+                            companyName
+                    );
 
             List<UserDTO> usersDTO = new ArrayList<>();
 
             for (User user : users) {
 
-                UUID customerId = null;
+                UUID userCustomerId = null;
+
                 if (user.getCustomer() != null) {
-                    customerId = user.getCustomer().getCustomerID();
+                    userCustomerId = user.getCustomer().getCustomerID();
                 }
 
                 UUID roleId = null;
+
                 if (user.getRole() != null) {
                     roleId = user.getRole().getRoleId();
                 }
 
                 UUID companyId = null;
+
                 if (user.getCompany() != null) {
                     companyId = user.getCompany().getCompanyId();
                 }
 
                 UUID statusId = null;
+
                 if (user.getStatus() != null) {
                     statusId = user.getStatus().getStatusId();
                 }
 
                 UserDTO dto = new UserDTO(
                         user.getUserId(),
-                        customerId,
+                        userCustomerId,
                         roleId,
                         companyId,
                         statusId,
@@ -137,7 +156,6 @@ public class UserService {
             );
 
         } catch (Exception ex) {
-            ex.printStackTrace();
 
             return new GeneralResponse<>(
                     ResponseStatus.INTERNAL_SERVER_ERROR,
@@ -146,6 +164,4 @@ public class UserService {
             );
         }
     }
-
-
 }

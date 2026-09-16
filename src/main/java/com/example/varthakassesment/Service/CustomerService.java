@@ -26,7 +26,8 @@ public class CustomerService {
     {
         try {
             //Check if customer is already in the Database:
-            Optional<Customer> ExistingCustomer = this.customerRepo.findByCustomerNameIgnoreCase(newCustomer.getCustomerName());
+            Optional<Customer> ExistingCustomer = this.customerRepo.findByCustomerNameIgnoreCase
+                    (newCustomer.getCustomerName());
 
             if (ExistingCustomer.isEmpty()) {
 
@@ -45,8 +46,9 @@ public class CustomerService {
         }
         catch (Exception ex)
         {
-            ex.printStackTrace();
-            return new GeneralResponse<>( ResponseStatus.INTERNAL_SERVER_ERROR, null, null);
+
+            return new GeneralResponse<>
+                    ( ResponseStatus.INTERNAL_SERVER_ERROR, null, null);
 
         }
 

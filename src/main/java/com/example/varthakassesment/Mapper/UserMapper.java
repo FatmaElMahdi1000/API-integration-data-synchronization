@@ -22,12 +22,11 @@ public interface UserMapper {
     @Mapping(target = "customer", ignore = true)
     @Mapping(target = "role", ignore = true)
     @Mapping(target = "active", ignore = true)
-    @Mapping(target = "status", ignore = true)
+    @Mapping(target = "company", ignore = true) //Added ignoring company mapping.
 
 
     //REVIEW
 //    @Mapping(target = "company", ignore = true) // Stops MapStruct from overwriting the shared Company entity
-//    @Mapping(target = "id", ignore = true)      // Ignores primary key autogen
 
     public void MapExUserToEntity(ExUserDTO ExternalUserDTO ,
                                  @MappingTarget User user);
