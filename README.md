@@ -1,512 +1,520 @@
-# API integration – User Synchronization Service
+# Varthak Assessment API
 
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://www.oracle.com/java/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4%2B%20%2F%204.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Oracle](https://img.shields.io/badge/Database-Oracle%20XE-red.svg)](https://www.oracle.com/database/)
-[![MapStruct](https://img.shields.io/badge/Mapping-MapStruct%201.7-blue.svg)](https://mapstruct.org/)
-[![OpenAPI](https://img.shields.io/badge/Swagger-OpenAPI%203-green.svg)](https://swagger.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Oracle XE](https://img.shields.io/badge/Database-Oracle%20XE%2021c-red.svg)](https://www.oracle.com/database/)
+[![Flyway](https://img.shields.io/badge/DB%20Migration-Flyway-CC3333.svg)](https://flywaydb.org/)
+[![MapStruct](https://img.shields.io/badge/Mapping-MapStruct-blue.svg)](https://mapstruct.org/)
+[![Swagger](https://img.shields.io/badge/API%20Docs-Swagger%20UI-green.svg)](https://swagger.io/)
+[![Docker](https://img.shields.io/badge/Container-Docker%20Compose-2496ED.svg)](https://www.docker.com/)
 
-A production-ready Spring Boot backend service that integrates with an external customer API, synchronizes user and organization data into a local Oracle relational database, prevents duplicate records, reconciles deactivated entities, and exposes clean, decoupled RESTful APIs for consumption.
+A production-grade Spring Boot backend that integrates with an external customer identity API, synchronizes user and organization data into a local Oracle XE 21c relational database, enforces strict deduplication, reconciles deactivated records, and exposes clean, decoupled REST endpoints — all wrapped in a minimal, reproducible Docker Compose footprint.
+
+This project is a **Varthak technical assessment** focused on **layered software architecture**: clean separation of concerns, robust data synchronization, and integration patterns, with deliberately minimal UI overhead.
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Key Features](#key-features)
-- [Technology Stack](#technology-stack)
-- [Data Model & ER Diagram](#data-model--er-diagram)
-- [Synchronization Lifecycle & Deduplication](#synchronization-lifecycle--deduplication)
-- [API Documentation](#api-documentation)
-  - [1. Register Customer](#1-register-customer)
-  - [2. Synchronize Users](#2-synchronize-users)
-  - [3. Get All Users](#3-get-all-users)
-  - [4. Filter Users by Company](#4-filter-users-by-company)
-- [Project Structure](#project-structure)
-- [Configuration & Setup](#configuration--setup)
-- [Running the Application](#running-the-application)
-- [Swagger UI & API Testing](#swagger-ui--api-testing)
-- [Error Handling & HTTP Status Codes](#error-handling--http-status-codes)
-- [Design Document & Clarifications](#design-document--clarifications)
+- [1. Project Overview & Architecture](#1-project-overview--architecture)
+- [2. Key Features & Fixes Implemented](#2-key-features--fixes-implemented)
+- [3. Technology Stack](#3-technology-stack)
+- [4. Repository Layout](#4-repository-layout)
+- [5. Prerequisites](#5-prerequisites)
+- [6. Quick Start (For the Assessor)](#6-quick-start-for-the-assessor)
+- [7. Deployment Options](#7-deployment-options)
+  - [Option A — Standard Docker Compose (Source Build)](#option-a--standard-docker-compose-source-build)
+  - [Option B — Offline Tar Package (Pre-built Images)](#option-b--offline-tar-package-pre-built-images)
+- [8. Endpoints & API Access](#8-endpoints--api-access)
+- [9. Synchronization Behavior](#9-synchronization-behavior)
+- [10. Concurrency & Data Integrity](#10-concurrency--data-integrity)
+- [11. Database Management & Migrations](#11-database-management--migrations)
+- [12. Configuration Reference](#12-configuration-reference)
+- [13. Failure Testing](#13-failure-testing)
+- [14. Application Teardown](#14-application-teardown)
+- [15. Testing](#15-testing)
+- [16. Documents](#16-documents)
 - [Author](#author)
 
 ---
 
-## Overview
+## 1. Project Overview & Architecture
 
-In modern SaaS ecosystems, platforms must regularly ingest, normalize, and synchronize user hierarchies from third-party customer identity systems.
+**Application Name:** Varthak Assessment API
 
-This service fulfills the Varthak technical assessment requirements:
-1. **Third-Party Integration**: Connects to the external Customer API (`https://assessment-api-gamma.vercel.app/`) using Spring's modern, non-blocking `RestClient`.
-2. **Full Pagination & Fault Tolerance**: Traverses paginated datasets automatically with built-in retry mechanisms and exponential backoff.
-3. **Data Normalization & Decoupling**: Strictly isolates external contracts (`ExUserDTO`, `ExCompanyDTO`) from internal domain models (`User`, `Company`, `Role`, `Status`) using high-performance MapStruct compile-time mappers.
-4. **Idempotent Synchronization & Deduplication**: Employs in-memory indexing (`HashSet`, `HashMap` caches) alongside database constraints to prevent duplicate entries and perform seamless upserts.
-5. **State Reconciliation**: Detects users deleted or removed from the customer's remote API and marks them deactivated (`active = 0`).
-6. **Query & Filter APIs**: Exposes internal endpoints to retrieve stored users, supporting exact and partial case-insensitive filtering by company.
+The service acts as an **integration gateway** that:
 
----
+1. **Registers customer organizations** as isolated tenants.
+2. **Ingests paginated user profiles** from an external customer API (`https://assessment-api-gamma.vercel.app/`) using retries and exponential backoff.
+3. **Normalizes and persists** the payload into a normalized Oracle schema, strictly decoupling external contracts from internal domain models.
+4. **Reconciles state** so users removed upstream are soft-deactivated rather than hard-deleted, preserving audit history.
 
-## System Architecture
+### Architectural Philosophy
 
-The service adheres to standard Layered Architecture and Clean Architecture principles:
-
-```
-                            +---------------------------------+
-                            |      External Customer API      |
-                            | assessment-api-gamma.vercel.app |
-                            +---------------------------------+
-                                             |
-                                 [HTTP GET /api/users]
-                                             v
-                            +---------------------------------+
-                            |       CustomerApiService        |
-                            |  (RestClient + Retry / Backoff) |
-                            +---------------------------------+
-                                             |
-                                  [List<ExUserDTO>]
-                                             v
-                            +---------------------------------+
-                            |     SynchronizeUser Service     |
-                            |  - In-memory duplicate check    |
-                            |  - Entity Resolution (Company,  |
-                            |    Role, Status)                |
-                            |  - MapStruct Entity Mapping     |
-                            |  - Missing User Deactivation    |
-                            +---------------------------------+
-                                             |
-                             [JPA Transactions / Repositories]
-                                             v
-                            +---------------------------------+
-                            |       Oracle XE Database        |
-                            | (InternalUSER, Company, Role,..) |
-                            +---------------------------------+
-                                             |
-                                    [Entity Retrieval]
-                                             v
-                            +---------------------------------+
-                            |     UserService / Controller    |
-                            |   (Converts Entity -> UserDTO)  |
-                            +---------------------------------+
-                                             |
-                                 [HTTP GET /api/v1/users]
-                                             v
-                            +---------------------------------+
-                            |          Client / SPA           |
-                            +---------------------------------+
-```
-
----
-
-## Key Features
-
-- **Multi-Tenant Scoping**: All imported users, companies, and roles are associated with a registered `Customer` record.
-- **Dynamic Entity Resolution**: Automatically resolves or creates lookup records (`Company`, `Role`, `Status`) during the ingestion process, preventing redundant roundtrips via synchronized run caches.
-- **Fail-Safe Synchronization**: Wrapped in `@Transactional` boundaries to guarantee atomicity. If a fatal external communication failure occurs after retries, changes are aborted cleanly without corrupting database state.
-- **Soft Deactivation**: Avoids destructive hard deletes. Users who no longer exist in the upstream customer source are flagged as inactive (`active = 0`), preserving audit history and relational integrity.
-- **Uniform API Envelopes**: All responses are wrapped in a standard `GeneralResponse<T>` containing status code, human-readable message, and typed payload.
-
----
-
-## Technology Stack
-
-| Layer / Concern | Technology | Justification |
-|---|---|---|
-| **Language** | Java 21 LTS | Modern records, pattern matching, performance, virtual threads compatibility |
-| **Framework** | Spring Boot 3.4+ / 4.x | Robust ecosystem, DI, auto-configuration, production-ready observability |
-| **HTTP Client** | Spring 6+ `RestClient` | Fluent, synchronous HTTP client replacing legacy `RestTemplate` |
-| **Persistence** | Spring Data JPA / Hibernate | Type-safe repository abstraction with optimized queries |
-| **Database** | Oracle Database XE | Industrial-grade relational persistence with strict ACID compliance |
-| **Mapping** | MapStruct 1.7 | High-speed, compile-time, zero-reflection object mapping |
-| **Documentation** | SpringDoc OpenAPI / Swagger 3 | Interactive live API documentation and testing UI |
-| **Containerization** | Docker & Docker Compose | Consistent local and staging environments |
-
----
-
-## Data Model & ER Diagram
-
-The domain model cleanly separates customer tenants, organizations, user records, and lookup statuses:
-
-```mermaid
-erDiagram
-    CUSTOMER ||--o{ USER : "owns"
-    CUSTOMER ||--o{ COMPANY : "owns"
-    COMPANY ||--o{ USER : "employs"
-    ROLE ||--o{ USER : "assigned to"
-    STATUS ||--o{ USER : "categorized by"
-
-    CUSTOMER {
-        UUID customerID PK
-        string customerName
-    }
-
-    COMPANY {
-        UUID companyId PK
-        UUID Customer_Id FK
-        string companyName
-        string industry
-        string website
-        int employeesNumber
-    }
-
-    ROLE {
-        UUID roleId PK
-        string name
-    }
-
-    STATUS {
-        UUID statusId PK
-        string statusName
-    }
-
-    USER {
-        UUID userId PK
-        UUID Customer_Id FK
-        UUID Company_Id FK
-        UUID role_Id FK
-        UUID status_Id FK
-        string externalUserId
-        string name
-        string email
-        string phone
-        timestamp externalCreatedAt
-        timestamp externalUpdatedAt
-        int active
-    }
-```
-
----
-
-## Synchronization Lifecycle & Deduplication
-
-When a sync is triggered via `POST /api/sync/users` with a valid `customerId`:
+- **Layered / Clean Architecture** — strict decoupling between the **API Controller layer**, **Business/Service layer**, **Persistence (Repository) layer**, and **DTO Mappers**.
+- **DTO Isolation Boundary** — the external payload DTOs (`ExUserDTO`, `ExCompanyDTO`, `ExPaginationDTO`) and JPA entities (`User`, `Company`, `Role`, `Status`, `Customer`) are never leaked to REST consumers; compile-time **MapStruct** mappings bridge the layers.
+- **Multi-Tenant partitioning** — every synced record is scoped to a parent `Customer` UUID, preventing cross-tenant data pollution.
+- **Idempotency by default** — synchronization is safely retryable without duplicate rows or false-positive errors.
+- **Non-destructive reconciliation** — upstream deletions map to `active = 0` (soft deactivation), never destructive `DELETE`.
 
 ```
-1. Customer Validation
-   └── Verify customerId exists in local database.
-2. Ingestion with Auto-Pagination & Retries
-   └── Fetch all pages from external endpoint (/api/users?page=X&limit=50).
-   └── If a transient network glitch occurs, retry up to 3 times with exponential backoff (1.5s, 3.0s).
-3. In-Memory Tracking & Deduplication
-   └── HashSet<String> externalIds tracks external user IDs present in this run.
-   └── Map<String, Company>, Map<String, Role>, Map<String, Status> cache lookups to minimize DB queries.
-4. Per-User Processing
-   ├── Look up existing user by (Customer, ExternalUserId).
-   ├── IF NOT FOUND (Create):
-   │     Map external DTO -> User entity via MapStruct.
-   │     Link resolved Customer, Company, Role, Status.
-   │     Set active = 1.
-   │     Persist new record. Increment 'created'.
-   └── IF FOUND (Update / Upsert):
-         Update fields (name, email, phone, updated timestamps).
-         Update linked relationships.
-         Set active = 1 (reactivate if previously inactive).
-         Persist changes. Increment 'updated'.
-5. Reconciliation / Deactivation
-   └── Retrieve all currently active users for this customer from DB.
-   └── Any user whose externalUserId is NOT in externalIds is marked active = 0.
-   └── Increment 'deactivated'.
-6. Completion
-   └── Commit transaction and return { created, updated, deactivated }.
+                       External Customer API
+                   (assessment-api-gamma.vercel.app)
+                                 |
+                     [GET /api/users?page=N&limit=50]
+                                 v
+              CustomerApiService  (RestClient + Retry/Backoff)
+                                 |
+                        [List<ExUserDTO>]
+                                 v
+       SynchronizeUser Service  (@Transactional)           <- Business Layer
+        - HashSet dedup + Entity resolution caches
+        - MapStruct user mapping
+        - Missing-user soft deactivation
+                                 |
+                     [JPA Repositories]
+                                 v
+                       Oracle XE 21c  (VARTHAK_APP schema)
+                                 |
+                     [UserService / Controllers]
+                                 |
+                        REST Clients / Swagger UI
 ```
+
+Full end-to-end diagrams (architecture, ER model, sequence flows) live in [DESIGN.md](DESIGN.md).
 
 ---
 
-## API Documentation
+## 2. Key Features & Fixes Implemented
 
-Base URL: `http://localhost:4040`
+### Layered Architecture
+- Strict decoupling between **Controllers**, **Services**, **Repositories**, and **DTO Mappers**.
+- External API contracts, JPA entities, and client-facing DTOs are three isolated models connected only through MapStruct compile-time mappers — zero runtime reflection.
 
-### 1. Register Customer
-Registers a new customer account within our platform.
+### Database Connection & Sync Fixes
+- **Oracle XE 21c container startup synchronization** fixed via **Flyway auto-migrations** against the `VARTHAK_APP` schema, eliminating race conditions where the application started before the database was ready.
+- The Compose file uses `depends_on: condition: service_healthy` with the Oracle container's `healthcheck.sh`, so the app only boots once Oracle is fully accepting connections.
+- Flyway automatically **validates and applies any pending database migrations** when the application starts — no manual SQL execution required.
 
-- **Endpoint**: `POST /api/customers`
-- **Headers**: `Content-Type: application/json`
-- **Request Body**:
-  ```json
-  {
-    "customerName": "assessment-api-gamma",
-    "customerURL": "https://assessment-api-gamma.vercel.app/"
-  }
-  ```
-- **Response** (`201 Created`):
-  ```json
-  {
-    "response": "CREATED",
-    "message": "Customer has been created successfully",
-    "data": {
-      "customerID": "40ac987a-f34b-43dc-9a1a-1d5e52d662c3",
-      "customerName": "assessment-api-gamma",
-      "customerURL": "https://assessment-api-gamma.vercel.app/",
-      "usersIds": [],
-      "companiesIds": []
-    }
-  }
-  ```
+### Port Mapping & Health Checks
+- **Standardized execution on Port `3030`** for the application, with Oracle on `1521`.
+- **HikariCP** connection pooling and Spring Data JPA auto-configuration provide an optimized, production-ready datasource out of the box.
+- `spring.jpa.hibernate.ddl-auto=validate` guarantees Hibernate validates entities against the Flyway-managed schema without ever modifying it.
 
-#### cURL Example:
-```bash
-curl -X POST http://localhost:4040/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerName": "assessment-api-gamma",
-    "customerURL": "https://assessment-api-gamma.vercel.app/"
-  }'
-```
+### Containerization Optimizations
+- **Multi-stage Docker builds** — a Maven/Temurin 21 builder stage compiles the JAR, which is then copied into a slim `eclipse-temurin:21-jre` runtime image.
+- **Complete offline packaging** — pre-built images can be exported as `tar` archives and deployed on a machine with **zero internet access** (see [Option B](#option-b--offline-tar-package-pre-built-images)).
+
+### Core Business Behavior (non-UI)
+- **Intra-batch deduplication** via `HashSet<String>` of external user IDs.
+- **Database-level idempotent upsert** (`findByCustomerAndExternalUserId`) — creates new users, updates changed ones, reactivates previously inactive ones.
+- **N+1 query elimination** — in-run `HashMap` caches resolve `Company`, `Role`, and `Status` in O(1) instead of one roundtrip per user.
+- **Soft deactivation** of users absent from the latest upstream pull.
 
 ---
 
-### 2. Synchronize Users
-Fetches users from the external customer API, reconciles changes, and stores them in our local database.
+## 3. Technology Stack
 
-- **Endpoint**: `POST /api/sync/users`
-- **Headers**: `Content-Type: application/json`
-- **Request Body**: UUID string (the Customer ID to synchronize)
-  ```json
-  "40ac987a-f34b-43dc-9a1a-1d5e52d662c3"
-  ```
-- **Response** (`200 OK`):
-  ```json
-  {
-    "response": "OK",
-    "message": "User synchronization completed successfully",
-    "data": {
-      "created": 45,
-      "updated": 5,
-      "deactivated": 2
-    }
-  }
-  ```
-
-#### cURL Example:
-```bash
-curl -X POST http://localhost:4040/api/sync/users \
-  -H "Content-Type: application/json" \
-  -d '"40ac987a-f34b-43dc-9a1a-1d5e52d662c3"'
-```
+| Layer / Concern            | Technology                                      | Version          |
+|----------------------------|-------------------------------------------------|------------------|
+| Language                   | Java                                            | 21 (LTS)         |
+| Framework                  | Spring Boot                                     | 4.1.1            |
+| HTTP Client                | Spring `RestClient`                             | (Spring Framework 7) |
+| Persistence                | Spring Data JPA / Hibernate                     | —                |
+| Database                   | Oracle Database XE                             | 21c (`gvenzl/oracle-xe:slim-faststart`) |
+| DB Migrations              | Flyway                                          | (Spring Boot-managed) |
+| Oracle JDBC Driver         | `ojdbc11`                                       | 23.9.0.25.07     |
+| Object Mapping             | MapStruct                                       | 1.7.0            |
+| API Documentation          | SpringDoc OpenAPI / Swagger UI                  | 3.1.0            |
+| Build                      | Maven + Maven Wrapper                           | 3.9+             |
+| Containerization           | Docker & Docker Compose                         | —                |
 
 ---
 
-### 3. Get All Users
-Retrieves all synchronized users stored in our local database.
-
-- **Endpoint**: `GET /api/v1/users`
-- **Response** (`200 OK`):
-  ```json
-  {
-    "response": "OK",
-    "message": "Users retrieved successfully",
-    "data": [
-      {
-        "userId": "b4a8e231-18e4-44cf-b962-4fdf1bf77b10",
-        "customerId": "40ac987a-f34b-43dc-9a1a-1d5e52d662c3",
-        "roleId": "4c3b9b4f-c003-4f9e-a89e-ec45169a92a2",
-        "companyId": "f7d739d2-78d1-4db8-b57f-1d3fa54e27f0",
-        "statusId": "1a3f65b8-502a-4ce6-a704-58b99d1469e7",
-        "externalUserId": "usr_991823",
-        "name": "Jane Doe",
-        "email": "jane.doe@example.com",
-        "phone": "+1-555-0199",
-        "externalCreatedAt": "2024-01-15T08:30:00Z",
-        "externalUpdatedAt": "2024-03-10T12:00:00Z",
-        "active": 1
-      }
-    ]
-  }
-  ```
-
-#### cURL Example:
-```bash
-curl -X GET http://localhost:4040/api/v1/users
-```
-
----
-
-### 4. Filter Users by Company
-Retrieves users who belong to a company matching the specified search query (case-insensitive substring match).
-
-- **Endpoint**: `GET /api/v1/users?company={companyName}`
-- **Query Parameter**: `company` (string, e.g. `Google` or `tech`)
-- **Response** (`200 OK`):
-  ```json
-  {
-    "response": "OK",
-    "message": "Users retrieved successfully",
-    "data": [
-      {
-        "userId": "b4a8e231-18e4-44cf-b962-4fdf1bf77b10",
-        "customerId": "40ac987a-f34b-43dc-9a1a-1d5e52d662c3",
-        "roleId": "4c3b9b4f-c003-4f9e-a89e-ec45169a92a2",
-        "companyId": "f7d739d2-78d1-4db8-b57f-1d3fa54e27f0",
-        "statusId": "1a3f65b8-502a-4ce6-a704-58b99d1469e7",
-        "externalUserId": "usr_991823",
-        "name": "Jane Doe",
-        "email": "jane.doe@example.com",
-        "phone": "+1-555-0199",
-        "externalCreatedAt": "2024-01-15T08:30:00Z",
-        "externalUpdatedAt": "2024-03-10T12:00:00Z",
-        "active": 1
-      }
-    ]
-  }
-  ```
-
-#### cURL Example:
-```bash
-curl -X GET "http://localhost:4040/api/v1/users?company=Google"
-```
-
----
-
-## Project Structure
+## 4. Repository Layout
 
 ```text
-src/
-└── main/
-    ├── java/com/example/varthakassesment/
-    │   ├── Client/
-    │   │   ├── ClientService/
-    │   │   │   └── CustomerApiService.java     # RestClient pagination & backoff retry
-    │   │   └── Config/
-    │   │       └── CustomerConfig.java         # RestClient bean & auth header setup
-    │   ├── Controller/
-    │   │   ├── CustomerController.java         # Customer registration endpoint
-    │   │   ├── SyncController.java             # User synchronization trigger
-    │   │   └── UserController.java             # User query & company filter
-    │   ├── DTO/
-    │   │   ├── External/                       # Inbound upstream contracts
-    │   │   │   ├── ExCompanyDTO.java
-    │   │   │   ├── ExPaginationDTO.java
-    │   │   │   └── ExUserDTO.java
-    │   │   └── Internal/                       # Public & internal API contracts
-    │   │       ├── CompanyDTO.java
-    │   │       ├── CustomerDTO.java
-    │   │       ├── RoleDTO.java
-    │   │       ├── StatusDTO.java
-    │   │       ├── SyncResponseDTO.java
-    │   │       └── UserDTO.java
-    │   ├── Enum/
-    │   │   └── ResponseStatus.java             # Standard status codes enum
-    │   ├── Mapper/
-    │   │   └── UserMapper.java                 # MapStruct compile-time entity mapping
-    │   ├── Model/                              # JPA Domain Entities
-    │   │   ├── Company.java
-    │   │   ├── Customer.java
-    │   │   ├── Role.java
-    │   │   ├── Status.java
-    │   │   └── User.java
-    │   ├── Repo/                               # Spring Data JPA repositories
-    │   │   ├── CompanyRepo.java
-    │   │   ├── CustomerRepo.java
-    │   │   ├── RoleRepo.java
-    │   │   ├── StatusRepo.java
-    │   │   └── UserRepo.java
-    │   ├── Response/                           # Generic HTTP response envelopes
-    │   │   ├── GeneralResponse.java
-    │   │   └── UserListResponse.java
-    │   ├── Service/                            # Core business logic
-    │   │   ├── CompanyService.java
-    │   │   ├── CustomerService.java
-    │   │   ├── RoleService.java
-    │   │   ├── StatusService.java
-    │   │   ├── SynchronizeUser.java            # ETL synchronization engine
-    │   │   └── UserService.java                # User querying & filtering
-    │   └── VarthakAssesmentApplication.java    # Spring Boot Main Application
-    └── resources/
-        └── application.properties              # Configuration file
+.
+├── src/main/java/com/example/varthakassesment/
+│   ├── Client/                 # RestClient integration + auth config
+│   ├── Controller/             # CustomerController, SyncController, UserController
+│   ├── DTO/
+│   │   ├── External/           # Upstream API contracts (ExUserDTO, ExCompanyDTO, ExPaginationDTO)
+│   │   └── Internal/           # Client-facing contracts (UserDTO, CustomerDTO, SyncResponseDTO, ...)
+│   ├── Mapper/                 # MapStruct compile-time mappers
+│   ├── Model/                  # JPA entities (User, Company, Role, Status, Customer)
+│   ├── Repo/                   # Spring Data JPA repositories
+│   ├── Response/               # Uniform GeneralResponse<T> envelope
+│   └── Service/                # CustomerService, SynchronizeUser, UserService
+├── src/main/resources/db/migration/   # Flyway scripts (V1__create_schema.sql)
+├── src/test/java/.../Services/        # Unit tests for the three core services
+├── docker-compose.yml         # Orchestration (Oracle + App)
+├── Dockerfile                 # Multi-stage build
+├── load_and_run.bat           # Offline one-click Windows launcher
+├── oracle-db.tar              # Pre-built Oracle XE image (offline mode)
+└── varthak-app.tar            # Pre-built application image (offline mode)
 ```
 
 ---
 
-## Configuration & Setup
+## 5. Prerequisites
 
-### Environment Variables
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Docker Engine with Compose v2).
+  - Windows / macOS: Docker Desktop installed and **running**.
+  - Linux: Docker Engine + `docker compose` plugin.
+- ~6–8 GB of free disk space (the Oracle XE image is large).
+- Internet connection — **only** for [Option A](#option-a--standard-docker-compose-source-build), which pulls the Maven build dependencies and base images. [Option B](#option-b--offline-tar-package-pre-built-images) works fully offline.
 
-Configure your database credentials and customer API token before running:
-
-```properties
-# Customer API Token
-CUSTOMER_API_TOKEN=your_bearer_token_here
-
-# Oracle Database Credentials
-DB_USERNAME=your_db_username
-DB_PASSWORD=your_db_password
-```
-
-### Application Properties (`src/main/resources/application.properties`)
-
-```properties
-server.port=4040
-customer.api.base-url=https://assessment-api-gamma.vercel.app
-customer.api.token=${CUSTOMER_API_TOKEN}
-
-spring.datasource.url=jdbc:oracle:thin:@//localhost:1521/XEPDB1
-spring.datasource.username=${DB_USERNAME}
-spring.datasource.password=${DB_PASSWORD}
-spring.datasource.driver-class-name=oracle.jdbc.OracleDriver
-
-spring.jpa.hibernate.ddl-auto=none
-spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.format_sql=true
-spring.jpa.database-platform=org.hibernate.dialect.OracleDialect
-```
+> No local Java/Maven installation is required — everything runs inside containers.
 
 ---
 
-## Running the Application
+## 6. Quick Start (For the Assessor)
 
-### Prerequisites
-- **Java 21 LTS** or later
-- **Maven 3.9+**
-- **Oracle Database XE** running on port `1521` (Service: `XEPDB1`)
+The fastest path from clean machine to a synced database:
 
-### 1. Build the Application
+1. **Clone this repository.**
+2. **Set the external API token** (used to authenticate against the customer API):
+
+   ```powershell
+   # PowerShell
+   $env:CUSTOMER_API_TOKEN="your_bearer_token_here"
+   ```
+
+   ```bash
+   # Linux / macOS
+   export CUSTOMER_API_TOKEN="your_bearer_token_here"
+   ```
+
+3. **Build and start the stack:**
+
+   ```bash
+   docker compose up --build -d
+   ```
+
+4. **Wait for Oracle's health check and Flyway migration.** Oracle's first boot takes 1–3 minutes; the application container waits for the `service_healthy` condition and then applies the Flyway schema migration automatically. Confirm both services are up:
+
+   ```bash
+   docker compose ps
+   ```
+
+5. **Open Swagger UI:** <http://localhost:3030/swagger-ui.html>
+6. **Create a customer** (a `customerID` is returned — copy it for the next steps).
+7. **Synchronize users** for that customer ID.
+8. **Retrieve users** (optionally filtered by company).
+
+> **Important:** Customer IDs are **generated when a customer is created**. Use the `customerID` returned by the create response for all subsequent synchronization and retrieval requests — there is no pre-existing, fixed customer ID.
+
+The full requests for steps 6–8 are shown in [Section 8](#8-endpoints--api-access).
+
+---
+
+## 7. Deployment Options
+
+### Option A — Standard Docker Compose (Source Build)
+
+Builds the application image from source and starts both containers. Oracle's health check (`healthcheck.sh`) is used to guarantee the app only starts after the database is ready.
+
 ```bash
-mvn clean package -DskipTests
+docker compose up --build -d
 ```
 
-### 2. Run Locally
+This starts two services:
+
+| Service      | Image                              | Port      | Purpose                       |
+|--------------|------------------------------------|-----------|-------------------------------|
+| `oracle-db`  | `gvenzl/oracle-xe:slim-faststart`  | `1521`    | Oracle XE 21c (service `XEPDB1`) |
+| `app`        | `varthak-assesment-app:latest`     | `3030`    | Spring Boot application       |
+
+### Option B — Offline Tar Package (Pre-built Images)
+
+For environments **without internet access**, the deliverable includes fully pre-built images:
+
+| File                 | Description                                      |
+|----------------------|--------------------------------------------------|
+| `oracle-db.tar`      | Pre-built `gvenzl/oracle-xe:slim-faststart` image |
+| `varthak-app.tar`    | Pre-built `varthak-assesment-app:latest` image     |
+| `docker-compose.yml` | Service orchestration                            |
+| `load_and_run.bat`   | One-click Windows launcher                       |
+
+#### Windows
+
+**Option 1 — Double-click** `load_and_run.bat`.
+
+**Option 2 — Run manually in PowerShell or Command Prompt:**
+
+```powershell
+.\load_and_run.bat
+```
+
+#### Linux / macOS
+
 ```bash
-mvn spring-boot:run
+docker load -i oracle-db.tar
+docker load -i varthak-app.tar
+docker compose up -d
 ```
-Alternatively, execute the packaged JAR:
+
+The launcher/scaffold:
+1. Loads the Oracle XE image from `oracle-db.tar`.
+2. Loads the application image from `varthak-app.tar`.
+3. Starts the stack with `docker compose up -d --no-build` (explicitly **no build**, so nothing is fetched from the network).
+
+> The first Oracle boot can take 1–3 minutes as it initializes the instance. The app waits for Oracle's health check before running the Flyway migration.
+
+---
+
+## 8. Endpoints & API Access
+
+Once both containers are healthy:
+
+| Resource                       | URL                                |
+|--------------------------------|------------------------------------|
+| Base URL                       | `http://localhost:3030`            |
+| Interactive Swagger UI         | `http://localhost:3030/swagger-ui.html` |
+| OpenAPI Documentation Spec     | `http://localhost:3030/v3/api-docs` |
+
+### Core Endpoints
+
+| Method | Path                       | Description                                                  |
+|--------|----------------------------|--------------------------------------------------------------|
+| `POST` | `/api/customers`           | Registers a customer organization (tenant) and returns a new `customerID`. |
+| `POST` | `/api/sync/users`          | Triggers ingestion, deduplication & reconciliation for a customer. |
+| `GET`  | `/api/v1/users`            | Retrieves all synchronized users for a customer.             |
+| `GET`  | `/api/v1/users?company=X`  | Filters users by company (case-insensitive substring match). |
+
+All responses are wrapped in a standardized `GeneralResponse<T>` envelope:
+
+```json
+{
+  "response": "OK | CREATED | BAD_REQUEST | CONFLICT | BAD_GATEWAY | INTERNAL_SERVER_ERROR",
+  "message": "Human-readable status description",
+  "data": { }
+}
+```
+
+### Step-by-Step Flow
+
+**Step 1 — Create a customer:**
+
 ```bash
-java -jar target/Varthak-Assesment-0.0.1-SNAPSHOT.jar
+curl -X POST http://localhost:3030/api/customers \
+  -H "Content-Type: application/json" \
+  -d '{"customerName":"assessment-api-gamma"}'
+```
+
+```json
+{
+  "response": "CREATED",
+  "message": "Customer has been created successfully",
+  "data": {
+    "customerID": "40ac987a-f34b-43dc-9a1a-1d5e52d662c3",
+    "customerName": "assessment-api-gamma",
+    "usersIds": [],
+    "companiesIds": []
+  }
+}
+```
+
+**Step 2 — Copy the `customerID` returned above, then synchronize users for it:**
+
+```bash
+curl -X POST http://localhost:3030/api/sync/users \
+  -H "Content-Type: application/json" \
+  -d '"<CUSTOMER_ID>"'
+```
+
+The first synchronization against the **current live dataset** produces approximately:
+
+```json
+{
+  "response": "OK",
+  "message": "User synchronization completed successfully",
+  "data": { "created": 130, "updated": 0, "deactivated": 0 }
+}
+```
+
+> That count reflects the dataset verified at the time of writing and is **not guaranteed** — it may vary as the external dataset changes. A second synchronization of the same data is expected to report `0 created / 0 updated / 0 deactivated` (idempotent).
+
+**Step 3 — Retrieve users (optionally filtered by company):**
+
+```bash
+curl "http://localhost:3030/api/v1/users?customerId=<CUSTOMER_ID>"
+curl "http://localhost:3030/api/v1/users?customerId=<CUSTOMER_ID>&company=Google"
 ```
 
 ---
 
-## Swagger UI & API Testing
+## 9. Synchronization Behavior
 
-Interactive OpenAPI documentation is generated automatically. Once the application is running, navigate to:
+For each customer, `POST /api/sync/users` executes a deterministic pipeline:
 
-- **Swagger UI**: [http://localhost:4040/swagger-ui/index.html](http://localhost:4040/swagger-ui/index.html)
-- **OpenAPI JSON Spec**: [http://localhost:4040/v3/api-docs](http://localhost:4040/v3/api-docs)
+1. **Fetch the external users** (paginated, with retry/backoff up to 3 attempts).
+2. **If the external fetch fails**, the endpoint returns `HTTP 502 BAD_GATEWAY` **before modifying any synchronization data**.
+3. **Resolve `Company`, `Role`, and `Status`** within the customer context (in-memory caches avoid redundant roundtrips).
+4. **Look up each user** by `(Customer_Id, EXTERNAL_USER_ID)`.
+5. **Create** missing users.
+6. **Update** users whose `externalUpdatedAt` changed.
+7. **Reactivate** previously inactive users that reappear in the latest dataset.
+8. **Soft-deactivate** (`active = 0`) previously active users missing from the latest successful external dataset.
 
----
+### Uniqueness Guarantee
 
-## Error Handling & HTTP Status Codes
-
-All responses utilize consistent HTTP status codes paired with a standardized `GeneralResponse<T>` wrapper:
-
-| Status Code | Reason / Use Case |
-|---|---|
-| `200 OK` | Sync completed or data successfully retrieved |
-| `201 CREATED` | New Customer record created |
-| `400 BAD REQUEST` | Invalid input or malformed payload |
-| `404 NOT FOUND` | Specified Customer ID does not exist |
-| `409 CONFLICT` | Duplicate resource conflict (if strict duplicate rejection is enforced) |
-| `502 BAD GATEWAY` | Customer external API unreachable after retries |
-| `500 INTERNAL SERVER ERROR` | Unexpected internal exception or persistence failure |
+A database **`UNIQUE` constraint on `(Customer_Id, EXTERNAL_USER_ID)`** provides the final protection against duplicate users. Application-level lookup is the normal path, while database constraint violations are handled for concurrent creation races (see [Section 10](#10-concurrency--data-integrity)).
 
 ---
 
-## Design Document & Clarifications
+## 10. Concurrency & Data Integrity
 
-For in-depth architectural choices, trade-offs, and state machine diagrams, please see:
-- 📖 [DESIGN.md](DESIGN.md): Detailed architectural blueprints, ER models, and technical trade-off evaluations.
+User uniqueness is enforced at the **database level** through a composite `UNIQUE` constraint on `(Customer_Id, EXTERNAL_USER_ID)`. Related entity creation also handles concurrent creation races by flushing the insert and recovering from `DataIntegrityViolationException` by retrieving the record created by the competing synchronization.
 
+Concurrent synchronization was **manually tested with two simultaneous requests**; the resulting database contained **no duplicate** `(Customer_Id, EXTERNAL_USER_ID)` combinations.
+
+---
+
+## 11. Database Management & Migrations
+
+- **Engine:** Oracle Database XE 21c — container service `XEPDB1`, port `1521`.
+- **Schema:** `VARTHAK_APP` (Flyway-managed, created automatically).
+- **Automation:** Flyway automatically **validates and applies any pending migrations** on application startup — **no manual DDL required**. Already-applied migrations are left untouched.
+- **Credentials (Compose):** user `VARTHAK_APP` / password `app123` (local development only).
+- **Validation:** `spring.jpa.hibernate.ddl-auto=validate`, so Hibernate only validates entities against the migrated schema and never alters it.
+
+### Schema Tables (`V1__create_schema.sql`)
+
+| Table               | Purpose                                          |
+|---------------------|--------------------------------------------------|
+| `Internal_Customer` | Tenant / customer organizations                  |
+| `Internal_Company`  | Company / department records per tenant          |
+| `InternalROLE`      | Role lookup table (`Developer`, `Admin`, ...)    |
+| `Internal_STATUS`   | Lifecycle status lookup (`Active`, `Suspended`, ...) |
+| `InternalUSER`      | Synchronized user records                        |
+
+Key constraints:
+- Primary keys are `RAW(16)` UUIDs generated via Hibernate `GenerationType.UUID`.
+- **Unique composite constraint** on `(Customer_Id, EXTERNAL_USER_ID)` enforces per-tenant user uniqueness at the database level.
+- `active` (`NUMBER(1) DEFAULT 1`) enables non-destructive soft deactivation.
+
+---
+
+## 12. Configuration Reference
+
+Environment variables injected by `docker-compose.yml` (override the local defaults in `application.properties`):
+
+| Variable                          | Value                                              | Purpose                        |
+|-----------------------------------|----------------------------------------------------|--------------------------------|
+| `SPRING_DATASOURCE_URL`           | `jdbc:oracle:thin:@oracle-db:1521/XEPDB1`          | Oracle JDBC URL (compose DNS)  |
+| `SPRING_DATASOURCE_USERNAME`      | `VARTHAK_APP`                                      | Database user                 |
+| `SPRING_DATASOURCE_PASSWORD`      | `app123`                                           | Database password             |
+| `CUSTOMER_API_TOKEN`              | `<token>`                                          | Bearer token for the external customer API |
+| `ORACLE_PASSWORD`                 | `NewPassword`                                      | Oracle SYS password (container provisioning) |
+| `APP_USER`                        | `VARTHAK_APP`                                      | Auto-created app schema user  |
+| `APP_USER_PASSWORD`               | `app123`                                           | App user password            |
+
+**Profiles** (set via `spring.profiles.active`):
+
+| Profile        | Port | API Base URL                                | Use Case                       |
+|----------------|------|---------------------------------------------|--------------------------------|
+| `dev` (default)| 3030 | `https://assessment-api-gamma.vercel.app`   | Local development / assessment |
+| `test-failure` | 2020 | `https://assessment-api-gamma.vercel.app/invalid` | Intentionally invalid external API (see [Section 13](#13-failure-testing)) |
+
+---
+
+## 13. Failure Testing
+
+The default `dev` profile uses the **valid** external API URL. A separate `test-failure` profile points to an **intentionally invalid** external API path, so failure handling can be exercised without modifying the committed default configuration.
+
+| Profile        | Port | External API                                  |
+|----------------|------|-----------------------------------------------|
+| `default`      | 3030 | `https://assessment-api-gamma.vercel.app`     |
+| `test-failure` | 2020 | `https://assessment-api-gamma.vercel.app/invalid` |
+
+To exercise it, run the app with `spring.profiles.active=test-failure` and trigger a sync.
+
+**Verified behavior:**
+
+```
+External API failure
+        ↓
+HTTP 502 BAD_GATEWAY
+        ↓
+No partial synchronization
+```
+
+A failed upstream fetch aborts **before** any records are created, updated, or deactivated, and the `@Transactional` boundary rolls back cleanly.
+
+---
+
+## 14. Application Teardown
+
+**Graceful shutdown** (stops containers, keeps named volumes/data):
+
+```bash
+docker compose down
+```
+
+**Full reset** (stops containers **and** removes the Oracle data volume — wipes all data and any previously created customer IDs):
+
+```bash
+docker compose down -v
+```
+
+To remove the locally loaded offline images as well:
+
+```bash
+docker rmi varthak-assesment-app:latest gvenzl/oracle-xe:slim-faststart
+```
+
+---
+
+## 15. Testing
+
+### Automated Unit Tests
+
+```bash
+mvn test
+```
+
+Coverage includes:
+- External API pagination / null handling.
+- User creation.
+- User update detection.
+- Idempotent second synchronization.
+- Missing-user deactivation.
+- Reactivation of inactive users.
+- Customer / user service behavior.
+- Failure scenarios.
+
+| Test Class                      | Coverage                                              |
+|---------------------------------|-------------------------------------------------------|
+| `CustomerAPiServiceTest`        | External API pagination, retry/backoff, null handling |
+| `SynchronizeUserServiceTest`    | Full sync lifecycle: dedup, create, update, deactivate |
+| `UserServiceTest`               | User retrieval and company-based filtering            |
+
+### Manually Verified Scenarios
+
+| Scenario                           | Result                                        |
+|------------------------------------|-----------------------------------------------|
+| Initial synchronization            | 130 users created                             |
+| Second synchronization             | 0 created / 0 updated / 0 deactivated        |
+| Concurrent synchronization         | No duplicate users                           |
+| Unknown customer                   | HTTP 404                                    |
+| External API failure               | HTTP 502                                    |
+| Failed sync leaves existing data intact | PASS                                     |
+| Missing external user              | Soft-deactivated                            |
+| Customer-scoped retrieval          | Verified                                    |
+| Flyway migration                   | Applied successfully                        |
+| Docker startup                     | Verified                                    |
+
+---
+
+## 16. Documents
+
+- **[DESIGN.md](DESIGN.md)** — Detailed architecture: ER diagrams, sequence flows, deduplication strategy (409 vs. idempotent upsert), N+1 query solution, soft-delete rationale, multi-tenant scoping, and the production scalability roadmap.
+- **[SCOPE_AND_POST_FEEDBACK.md](SCOPE_AND_POST_FEEDBACK.md)** — Technical clarifications and assessment feedback responses: pagination/retry, concurrency handling, mapper correction, transaction rollback, customer isolation, failure profile, Flyway, the Oracle/Docker decision, UI scope, and additional optimizations.
+
+---
 
 ## Author
 
-**Fatma El Mahdi**  
-
+**Fatma El Mahdi**
